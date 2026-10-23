@@ -1,0 +1,6 @@
+TESTING: /home/jawz/Documents/GitHub/CS3220/lab3/test/public/takehome/alutest1.mem
+Passed!
+TESTING: /home/jawz/Documents/GitHub/CS3220/lab3/test/public/takehome/alutest2.mem
+Passed!
+TESTING: /home/jawz/Documents/GitHub/CS3220/lab3/test/public/takehome/varied_ops.mem
+Failed. exitcode: 4

@@ -19,8 +19,33 @@ module FU_STAGE(
   //      (widths: `ALUDATABITS, `ALUCSROUTBITS).
   //
   // Hint: this file is mostly wiring; the handshake *control* lives in de_stage.v.
+  wire [`ALUDATABITS-1:0] OP1;
+  wire [`ALUDATABITS-1:0] OP2;
+  wire [`ALUDATABITS-1:0] OP3;
+  wire [`ALUOPBITS-1:0] ALUOP;
+  wire [`ALUCSROUTBITS-1:0] CSR_ALU_OUT;
+  wire [`ALUCSRINBITS-1:0] CSR_ALU_IN;
 
+  assign {
+    OP1,
+    OP2,
+    ALUOP,
+    CSR_ALU_IN
+  } = from_DE_to_FU;
+  
+  external_alu ALU (
+    .clk(clk),
+    .rst(reset),
+    .OP1(OP1),
+    .OP2(OP2),
+    .OP3(OP3),
+    .ALUOP(ALUOP),
+    .CSR_ALU_OUT(CSR_ALU_OUT),
+    .CSR_ALU_IN(CSR_ALU_IN)
+  );
 
-
-
+  assign from_FU_to_DE = {
+    OP3,
+    CSR_ALU_OUT
+  };
 endmodule

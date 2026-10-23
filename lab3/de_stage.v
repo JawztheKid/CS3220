@@ -236,7 +236,15 @@ module DE_STAGE(
   reg  use_rs1_DE;  // instruction uses rs1
   reg  use_rs2_DE;  // instruction uses rs2
 
-  // TODO(in-class): Declare & unpack the DE <=> FU mailbox signals here.
+
+  reg [`ALUDATABITS-1:0] OP1;
+  reg [`ALUDATABITS-1:0] OP2;
+  reg [`ALUDATABITS-1:0] OP3;
+  reg [`ALUOPBITS-1:0] ALUOP;
+  reg [`ALUCSROUTBITS-1:0] CSR_ALU_OUT;
+  reg [`ALUCSRINBITS-1:0] CSR_ALU_IN;
+
+  // (in-class): Declare & unpack the DE <=> FU mailbox signals here.
   //
   // Suggestions (what to add near this spot):
   //   • regs you will drive toward the FU: OP1, OP2, ALUOP, CSR_ALU_IN
@@ -244,7 +252,10 @@ module DE_STAGE(
   //   • unpack: assign { OP3, CSR_ALU_OUT } = from_FU_to_DE;
   // Use the macros in define.vh (`ALUDATABITS, `ALUOPBITS, `ALUCSRINBITS,
   // `ALUCSROUTBITS) so widths stay consistent with FU_stage.v.
-
+  assign {
+    OP3,
+    CSR_ALU_OUT
+  } = from_FU_to_DE;
 
 
   // Decode instruction registers
@@ -288,14 +299,28 @@ module DE_STAGE(
                       (op_I_DE == `JAL_I) || 
                       (op_I_DE == `JALR_I)) ? ((rd_DE != 0) ? 1 : 0): 0; 
 
-  // TODO(in-class): Detect when the current instruction targets a mailbox reg.
+  // (in-class): Detect when the current instruction targets a mailbox reg.
   //
   // Suggestions: add a few wires comparing op_I_DE + rd_DE/rs2_DE against the
   // reserved indices in define.vh, e.g. "is_load_aluop is true if it's a LW and rd is assigned toALUOP_REG_IDX"
   //   
   // You mainly need these for take-home stalls; for in-class they still help
   // you reason about which instructions touch the ALU mailbox.
+  wire is_aluop;
+  wire is_op1_eALU;
+  wire is_op2_eALU;
+  wire is_op3_eALU;
+  wire is_read_stats_eALU;
+  wire is_mailbox_reg_tar;
 
+  assign is_op1_eALU = rd_mem_DE && (rd_DE == `OP1_REG_IDX);
+  assign is_op2_eALU = rd_mem_DE && (rd_DE == `OP2_REG_IDX);
+  assign is_aluop = rd_mem_DE && (rd_DE == `ALUOP_REG_IDX);
+  assign is_op3_eALU = wr_mem_DE && (rs2_DE == `OP3_REG_IDX);
+  assign is_read_stats_eALU = wr_mem_DE && (rs2_DE == `CSR_OUT_REG_IDX);
+
+
+  assign is_mailbox_reg_tar = is_op1_eALU | is_op2_eALU | is_op3_eALU | is_aluop | is_read_stats_eALU;
 
 
   always @(*) begin 
@@ -337,15 +362,18 @@ module DE_STAGE(
   assign has_data_hazards = (use_rs1_DE && in_use_regs[rs1_DE]) 
                          || (use_rs2_DE && in_use_regs[rs2_DE]);
 
-  // TODO(take-home): Stall when the ALU cannot accept an operand, or when the
+  // (take-home): Stall when the ALU cannot accept an operand, or when the
   // result is not valid yet for a store of OP3. In-class tests insert enough
   // NOPs that you can leave this alone for now
   //   e.g. OR an ALU-not-ready condition into pipeline_stall_DE using
   //   CSR_ALU_OUT from the FU together with your mailbox detection above
+  wire not_ready_eALU;
+
+  assign not_ready_eALU = (is_op1_eALU & ~CSR_ALU_OUT[0]) | (is_op2_eALU & ~CSR_ALU_OUT[1]) | (is_op3_eALU & ~CSR_ALU_OUT[2]);
 
 
 
-  assign pipeline_stall_DE = has_data_hazards || br_mispred_AGEX;
+  assign pipeline_stall_DE = has_data_hazards || br_mispred_AGEX || not_ready_eALU;
 
   always @(posedge clk) begin
     if (reset) begin
@@ -375,7 +403,7 @@ module DE_STAGE(
     end
   end
 
-  // TODO(in-class): Drive the mailbox toward the FU (typically on WB & negedge).
+  // (in-class): Drive the mailbox toward the FU (typically on WB & negedge).
   //
   // Suggestions (this is the main in-class control block):
   //   • Use an always @(negedge clk) (same edge as the RF write above) so the
@@ -395,10 +423,39 @@ module DE_STAGE(
   //
   // TODO(bonus): Also ack a completed result when streaming without reloading
   // ALUOP (otherwise the ALU can deadlock waiting for CSR_ALU_IN[0]).
+  always @(negedge clk) begin
+    if (reset) begin
+      OP1 <= '0;
+      OP2 <= '0;
+      ALUOP <= '0;
+      CSR_ALU_IN <= 1;
+    end
+    else if (wr_reg_WB) begin
+      case (wregno_WB)
+        `ALUOP_REG_IDX: begin
+          ALUOP <= regval_WB[`ALUOPBITS-1:0];
+          CSR_ALU_IN[0] <= 1;
+        end
+        `OP1_REG_IDX: begin
+          OP1 <= regval_WB;
+          CSR_ALU_IN[1] <= 1;
+          CSR_ALU_IN[0] <= 0;
+        end 
+        `OP2_REG_IDX: begin
+          OP2 <= regval_WB;
+          CSR_ALU_IN[2] <= 1;
+          CSR_ALU_IN[0] <= 0;
+        end
+        default:begin
+          CSR_ALU_IN <= '0;
+        end
+      endcase
+    end
+  end
 
 
 
-  // TODO(in-class): Make reads of OP3/CSR_ALU_OUT see the *live* FU values,
+  // (in-class): Make reads of OP3/CSR_ALU_OUT see the *live* FU values,
   // not whatever is sitting in the register file.
   //
   // Suggestions: maybe override rs2_val_DE with...
@@ -407,6 +464,8 @@ module DE_STAGE(
   //   otherwise, use the original rs2_val_DE"
   //
   // Then plug that into DE_latch_contents below (SW of OP3 needs the live result).
+  wire [`DBITS-1:0] rs2_replace_val;
+  assign rs2_replace_val =  is_op3_eALU ? OP3 : ( is_read_stats_eALU ? {{`DBITS-`ALUCSROUTBITS{'0}}, CSR_ALU_OUT} : rs2_val_DE);
 
 
 
@@ -419,7 +478,7 @@ module DE_STAGE(
     pcnext_DE,
     op_I_DE,
     rs1_val_DE,
-    rs2_val_DE, // TODO(in-class): swap in your live OP3/CSR override
+    rs2_replace_val, // (in-class): swap in your live OP3/CSR override
     sxt_imm_DE,
     is_br_DE,
     is_jmp_DE,
@@ -450,10 +509,18 @@ module DE_STAGE(
   // send DE latch contents to next pipeline stage
   assign DE_latch_out = DE_latch;
 
-  // TODO(in-class): Pack and drive `from_DE_to_FU` with your mailbox + CSR_ALU_IN.
+  // (in-class): Pack and drive `from_DE_to_FU` with your mailbox + CSR_ALU_IN.
   //
   // Suggestion: Pack from_DE_to_FU with OP1, OP2, ALUOP, CSR_ALU_IN
   // It's basically the same field order (and widths) as the unpack in FU_stage.v
+  assign from_DE_to_FU = {
+    OP1,
+    OP2,
+    ALUOP,
+    CSR_ALU_IN
+  };
+
+
 
 
 
