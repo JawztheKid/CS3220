@@ -65,7 +65,7 @@ reg read;
 reg store_output;
 
 // TODO:* complete the logic for wr_axis_rdy
-assign wr_axis_rdy = ~full;
+assign wr_axis_rdy = ~full & ~wr_rst_sync3_reg;
 
 assign rd_axis_vld = rd_axis_vld_reg;
 
@@ -162,7 +162,7 @@ always @* begin
     mem_read_data_valid_next = mem_read_data_valid_reg;
 
     //TODO:* complete the output read logic;
-    if (rd_axis_rdy || ~rd_axis_vld_reg) begin
+    if (store_output || ~mem_read_data_valid_reg) begin
         // output data not valid OR currently being transferred
         if (~empty) begin
             // not empty, perform read
